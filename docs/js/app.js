@@ -165,7 +165,12 @@ export class App {
     if (this.loading) return;
     this.loading = name || slug;
     this.briefingError = null;
-    loadCity(slug).then(city => {
+    // A story map that hasn't been baked yet falls back to a procedural city.
+    const load = mission ? loadCity(slug).catch(() => loadCity(this.index.procedural[0]).then(city => {
+      city.name = `${mission.location} (SIMULATED)`;
+      return city;
+    })) : loadCity(slug);
+    load.then(city => {
       this.loading = null;
       this.setCity(city, mission, mission ? null : Math.floor(Math.random() * 2 ** 30));
     }).catch(e => {
