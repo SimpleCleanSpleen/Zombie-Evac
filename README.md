@@ -10,6 +10,8 @@ to get as many people out as you can.
 - **Story mode:** 11 missions on real cities (Clarksville, Baltimore, Washington DC,
   Times Square, Shibuya, Paris, London, Venice, Pyongyang, Shanghai...).
 - **Endless mode:** procedural cities with dynamic difficulty.
+- **Leaderboard:** signed-in players pick a unique screen name; each player's best
+  Endless score (evacuated x threat level x difficulty) is ranked publicly.
 - **Tutorials:** six guided lessons (evacuation, barricades, infantry, support troops,
   fire support, choppers and VIPs) that walk through every tool step by step.
 - **Sign in with Google** to keep your campaign, threat level and options in the cloud.
@@ -56,7 +58,9 @@ Run locally: `python3 -m http.server -d docs 8000`, then open http://localhost:8
 
 Project `zombie-evac-vl6cz`: Authentication (Google provider) and Cloud Firestore.
 Each player's save is the document `users/{uid}`; `firestore.rules` only lets a
-signed-in player read and write their own document. Deploy rules with
+signed-in player read and write their own document. Screen names live in `screenNames/{NAME}` (owner uid)
+and best Endless scores in the publicly readable `leaderboard/{uid}`; the rules only
+let a player post under a name they own, and only raise their own score. Deploy rules with
 `firebase deploy --only firestore:rules`.
 
 Map data (c) OpenStreetMap contributors, ODbL.

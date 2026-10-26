@@ -1,6 +1,6 @@
 // Window, layout, input, rendering, menus (a port of the reference `App`).
 import * as K from "./consts.js";
-import { COL, rgb, mix, UNIT_SPECS, UNIT_ORDER, UNIT_KEYS, CAMPAIGN, SPEEDS, OPTION_ITEMS, CONTROLS } from "./consts.js";
+import { COL, rgb, mix, UNIT_SPECS, UNIT_ORDER, UNIT_KEYS, CAMPAIGN, SPEEDS, OPTION_ITEMS, CONTROLS, SCREEN_NAME } from "./consts.js";
 import { loadCity } from "./city.js";
 import { Game, Progression } from "./game.js";
 import { cellIndex, clamp, hypot } from "./grid.js";
@@ -114,6 +114,11 @@ export class App {
     this.t = 0; this.animT = 0; this.frameNo = 0;
     this.storyIndex = null;
     this.tutorialIndex = null; this.tutor = null; this.tutorBox = null;
+    this.board = null;              // leaderboard screen: { rows, mine } | { error } | { loading }
+    this.screenButtons = [];        // clickable buttons on the leaderboard / name screens
+    this.nameError = ""; this.nameBusy = false; this.namePrompted = false; this.nameReturn = "menu";
+    this.posted = null; this.scoreStatus = "";
+    this.nameInput = this.makeNameInput();
     this.loading = null;
     this.briefingError = null;
     this.handledResult = null;
@@ -128,6 +133,12 @@ export class App {
   }
 
   storeChanged() {
+    const st = this.store;
+    if (!st.user) this.namePrompted = false;
+    else if (st.profileLoaded && !st.screenName && !this.namePrompted && (this.mode === "menu" || this.mode === "loading")) {
+      this.namePrompted = true;
+      this.openNameEntry("menu");
+    }
     const p = this.store.progress;
     if (p.history.length !== this.progress.history.length || p.level !== this.progress.level) {
       this.progress.level = p.level; this.progress.history = p.history;
@@ -401,6 +412,70 @@ export class App {
 
   inMenu() { return this.mode === "menu" || this.mode === "options" || this.mode === "tutorials"; }
 
+  // ---- leaderboard and screen name ------------------------------------------
+
+  openLeaderboard() {
+    this.mode = "leaderboard";
+    this.board = { loading: true };
+    this.store.fetchLeaderboard()
+      .then(b => { if (this.mode === "leaderboard") this.board = b; })
+      .catch(e => { console.warn("leaderboard", e); this.board = { error: "LEADERBOARD UNAVAILABLE - CHECK YOUR CONNECTION" }; });
+  }
+
+  makeNameInput() {
+    const el = document.createElement("input");
+    Object.assign(el, { type: "text", maxLength: 16, autocomplete: "off", spellcheck: false, autocapitalize: "characters" });
+    el.setAttribute("aria-label", "Screen name");
+    Object.assign(el.style, {
+      position: "fixed", display: "none", background: "transparent", border: "none", outline: "none", padding: "0",
+      color: rgb(COL.YELLOW), fontFamily: FONT, fontWeight: "bold", textTransform: "uppercase", caretColor: rgb(COL.YELLOW),
+    });
+    el.addEventListener("input", () => {
+      el.value = el.value.toUpperCase().replace(/[^A-Z0-9_.-]/g, "");
+      this.nameError = "";
+    });
+    document.body.appendChild(el);
+    return el;
+  }
+
+  openNameEntry(back) {
+    this.nameReturn = back;
+    this.mode = "name";
+    this.nameError = "";
+    this.nameInput.value = this.store.screenName || "";
+    this.nameInput.style.display = "block";
+    setTimeout(() => this.nameInput.focus(), 0);
+  }
+
+  closeNameEntry() {
+    this.nameInput.style.display = "none";
+    this.nameInput.blur();
+    if (this.nameReturn === "leaderboard") this.openLeaderboard();
+    else { this.mode = "menu"; this.menuIndex = this.firstEnabled(); }
+  }
+
+  saveName() {
+    if (this.nameBusy) return;
+    const name = this.nameInput.value.trim().toUpperCase();
+    if (!SCREEN_NAME.test(name)) { this.nameError = "3-16 LETTERS, DIGITS, . _ OR -"; this.uiSound("ui_deny"); return; }
+    this.nameBusy = true;
+    this.store.claimScreenName(name).then(err => {
+      this.nameBusy = false;
+      if (err) { this.nameError = err; this.uiSound("ui_deny"); }
+      else { this.uiSound("ui_deploy_ok"); this.closeNameEntry(); }
+    });
+  }
+
+  /** Post a finished Endless match to the leaderboard (once per match). */
+  postScore() {
+    const g = this.game, res = g.lastResult;
+    if (!res || this.posted === res) return;
+    this.posted = res;
+    this.scoreStatus = "POSTING SCORE...";
+    this.store.submitScore({ score: res.score, level: res.played, difficulty: g.difficulty, city: g.city.name })
+      .then(s => { if (this.posted === res) this.scoreStatus = s; });
+  }
+
   menuItems() {
     if (this.mode === "tutorials") {
       const done = this.store.tutorials;
@@ -413,7 +488,8 @@ export class App {
     else items.push(["CONTINUE", "continue", false]);
     items.push([this.confirmNew ? "CONFIRM: ERASE STORY SAVE?" : "NEW GAME - STORY MODE", "story", true]);
     const fresh = !save && !this.store.tutorials.length;
-    items.push(["ENDLESS MODE", "endless", true], [fresh ? "TUTORIALS - START HERE" : "TUTORIALS", "tutorials", true],
+    items.push(["ENDLESS MODE", "endless", true], ["LEADERBOARD", "leaderboard", true],
+      [fresh ? "TUTORIALS - START HERE" : "TUTORIALS", "tutorials", true],
       ["CONTROLS", "controls", true], ["OPTIONS", "options", true]);
     const st = this.store;
     if (st.user) items.push(["SIGN OUT", "signout", true]);
@@ -435,6 +511,7 @@ export class App {
     } else if (action === "endless") this.startEndless();
     else if (action === "options") { this.mode = "options"; this.menuIndex = 0; }
     else if (action === "controls") this.mode = "controls";
+    else if (action === "leaderboard") this.openLeaderboard();
     else if (action === "tutorials") {
       this.mode = "tutorials";
       const next = TUTORIALS.findIndex(t => !this.store.tutorials.includes(t.id));
@@ -636,6 +713,12 @@ export class App {
       if (!this.game) return;
       if (this.inMenu()) return this.menuPointer("down", p);
       if (this.mode === "controls") { this.mode = "menu"; return; }
+      if (this.mode === "leaderboard" || this.mode === "name") {
+        const b = this.screenButtons.find(b => this.inRect(p, b.rect));
+        if (b) { this.uiSound("ui_select"); b.action(); }
+        else if (this.mode === "name") setTimeout(() => this.nameInput.focus(), 0);
+        return;
+      }
       if (this.mode === "briefing") {
         if (this.briefingReady()) { this.mode = "game"; this.inGame = true; }
         else if (this.briefingError && !this.loading) this.startStory(this.storyIndex);
@@ -696,7 +779,14 @@ export class App {
       if (!this.game) return;
       if (e.key === "F11") { e.preventDefault(); this.toggleFullscreen(); return; }
       if (e.key === " " || (e.ctrlKey && ["a", "z", "A", "Z"].includes(e.key))) e.preventDefault();
-      if (this.mode === "controls") {
+      if (this.mode === "name") {
+        if (e.key === "Enter") { e.preventDefault(); this.saveName(); }
+        else if (e.key === "Escape") { this.uiSound("ui_back"); this.closeNameEntry(); }
+      } else if (this.mode === "leaderboard") {
+        if (["Escape", "Enter", "Backspace"].includes(e.key)) { this.uiSound("ui_back"); this.mode = "menu"; this.menuIndex = this.firstEnabled(); }
+        else if ((e.key === "n" || e.key === "N") && this.store.user) this.openNameEntry("leaderboard");
+        else if (e.key === "r" || e.key === "R") this.openLeaderboard();
+      } else if (this.mode === "controls") {
         if (["Escape", "Enter", " ", "Backspace"].includes(e.key)) this.mode = "menu";
       } else if (this.inMenu()) this.menuKey(e);
       else if (this.mode === "briefing") {
@@ -729,6 +819,7 @@ export class App {
       if (g.phase === "running" && !g.paused) this.animT += dt * g.timeScale;
       this.updateTutor();
       if (g.phase === "over" && g.mission && g.result !== this.handledResult) this.handleMissionResult();
+      if (g.phase === "over" && !g.mission) this.postScore();
     }
     if (g) {
       for (const ev of g.soundEvents) this.audio.play(ev);
@@ -761,6 +852,7 @@ export class App {
 
   draw() {
     this.frameNo++;
+    if (this.mode !== "name" && this.nameInput.style.display !== "none") this.nameInput.style.display = "none";
     const g = this.ctx, [W, H] = this.size;
     if (!this.game) {
       g.fillStyle = c("BG"); g.fillRect(0, 0, W, H);
@@ -776,9 +868,11 @@ export class App {
     const mr = this.mapRect, gm = this.game;
     if (this.mode === "game" && gm.phase !== "over" && this.tutorActive()) this.drawTutor();
     else this.tutorBox = null;
-    if (this.inMenu() || this.mode === "controls" || this.mode === "briefing") {
+    if (this.inMenu() || ["controls", "briefing", "leaderboard", "name"].includes(this.mode)) {
       g.fillStyle = c("BG", 215 / 255); g.fillRect(0, 0, W, H);
       if (this.mode === "controls") this.drawControls();
+      else if (this.mode === "leaderboard") this.drawLeaderboard();
+      else if (this.mode === "name") this.drawNameEntry();
       else if (this.mode === "briefing") this.drawBriefing();
       else this.drawMenu();
     } else if (gm.phase === "over") this.drawGameOver();
@@ -822,7 +916,10 @@ export class App {
     this.text(heading || "OUTBREAK RESPONSE COMMAND // CCTV LINK", cx, y, heading ? this.med : this.small,
       heading ? c("YELLOW") : c("WHITE_DIM"), "midtop");
     y += ci(this.lineSize(this.med) * 1.8);
-    const bw = Math.min(ci(560 * u), W - 20), bh = this.lineSize(this.med) + ci(14 * u), gap = ci(10 * u);
+    const nItems = options ? OPTION_ITEMS.length : this.menuItems().length;
+    const room = H - ci(80 * u) - 2 * this.lineSize(this.small) - y;   // keep clear of the footer lines
+    const fit = Math.min(1, room / (nItems * (this.lineSize(this.med) + ci(24 * u))));
+    const bw = Math.min(ci(560 * u), W - 20), bh = ci((this.lineSize(this.med) + ci(14 * u)) * fit), gap = ci(10 * u * fit);
     this.menuRects = []; this.optionBars = {};
     const g = this.ctx;
     let hint, note;
@@ -869,7 +966,7 @@ export class App {
         return;
       }
       const st = this.store;
-      const who = st.user ? `SIGNED IN: ${st.user.name.toUpperCase()}` : "GUEST - PROGRESS SAVED ON THIS DEVICE ONLY";
+      const who = st.user ? `SIGNED IN: ${(st.screenName || st.user.name).toUpperCase()}` : "GUEST - PROGRESS SAVED ON THIS DEVICE ONLY";
       this.text(who + (st.status && st.user ? `  // ${st.status}` : ""), cx, y + gap, this.small, st.user ? c("CYAN") : c("WHITE_DIM"), "midtop");
       if (st.status && !st.user) this.text(st.status, cx, y + gap + this.lineSize(this.small), this.small, c("YELLOW"), "midtop");
       hint = "UP/DOWN SELECT   ENTER CONFIRM" + (this.inGame ? "   ESC RESUME" : "");
@@ -1082,7 +1179,8 @@ export class App {
       }
     }
     this.plotAgents(dg);
-    for (let i = 0; i < gm.P; i++) if (gm.vip[i] && gm.state[i] === CIV) ring(dg, ...P(gm.px[i], gm.py[i]), R(6, 5), c("VIP"), 1);
+    const pulse = 0.5 + 0.5 * Math.sin(this.t * 5), vipR = R(10 + 4 * pulse, 8), vipLw = Math.max(2, Math.round(1.2 * s));
+    for (let i = 0; i < gm.P; i++) if (gm.vip[i] && gm.state[i] === CIV) ring(dg, ...P(gm.px[i], gm.py[i]), vipR, c("VIP"), vipLw);
 
     for (const u of gm.units.values()) {      // health bars on damaged units
       if (u.hp === null || u.hp >= u.max_hp) continue;
@@ -1223,7 +1321,7 @@ export class App {
       [i => st[i] === ZOMBIE, "RED", size],
       [i => sick && st[i] === CIV && inc[i] > 0 && inc[i] < K.SYMPTOM_TIME, "RED", size],
       [i => st[i] === ZOMBIE && gm.episodeKind[i] === K.EP_LUNGE, "RED", size + 1],
-      [i => st[i] === CIV && gm.vip[i], "VIP", size + 1],
+      [i => st[i] === CIV && gm.vip[i], "VIP", size + 3],
     ];
     for (const [test, col, sz] of groups) {
       g.fillStyle = c(col);
@@ -1454,6 +1552,99 @@ export class App {
     else this.text(gm.city.name, left, y, small, c("WHITE_DIM"));
   }
 
+  // ---- leaderboard screens ------------------------------------------------------------
+
+  /** A row of clickable buttons centred on y; remembers them for the pointer handler. */
+  drawButtons(buttons, cx, y) {
+    const g = this.ctx, gap = ci(8 * this.u), bh = this.lineSize(this.small) + 2 * gap;
+    const widths = buttons.map(([t]) => this.textWidth(t, this.small) + 4 * gap);
+    let x = cx - (widths.reduce((a, b) => a + b, 0) + 2 * gap * (buttons.length - 1)) / 2;
+    this.screenButtons = buttons.map(([t, action], i) => {
+      const rect = { x, y, w: widths[i], h: bh }, hot = this.mouse && this.inRect(this.mouse, rect);
+      if (hot) box(g, rect.x, rect.y, rect.w, rect.h, rgb(mix(COL.BG, COL.YELLOW, 0.18)));
+      box(g, rect.x, rect.y, rect.w, rect.h, hot ? c("YELLOW") : c("CYAN"), Math.max(2, this.uiLw - 1));
+      this.text(t, rect.x + rect.w / 2, rect.y + rect.h / 2, this.small, hot ? c("YELLOW") : c("WHITE"), "center");
+      x += widths[i] + 2 * gap;
+      return { rect, action };
+    });
+    return y + bh;
+  }
+
+  drawLeaderboard() {
+    const [W, H] = this.size, u = this.u, cx = W / 2, g = this.ctx, st = this.store, small = this.small;
+    const title = this.fontPx(52 * u), lh = this.lineSize(small);
+    let y = ci(H * 0.05);
+    this.text("LEADERBOARD", cx, y, title, c("WHITE"), "midtop");
+    y += this.lineSize(title);
+    this.text("ENDLESS MODE // BEST SCORE PER COMMANDER", cx, y, small, c("YELLOW"), "midtop");
+    y += lh + ci(14 * u);
+    const cols = [["#", 0.04, "midright"], ["COMMANDER", 0.08, "midleft"], ["SCORE", 0.56, "midright"], ["THREAT", 0.69, "midright"],
+      ["DIFF", 0.72, "midleft"], ["DATE", 0.85, "midleft"]];
+    const bw = Math.min(ci(900 * u), W - 20), bx = cx - bw / 2;
+    const b = this.board || {}, rows = b.rows || [];
+    const bodyH = (Math.max(rows.length, 3) + (b.mine && b.mine.rank > rows.length ? 2 : 0) + 1) * lh + 2 * this.pad;
+    box(g, bx, y, bw, bodyH, c("BG"));
+    box(g, bx, y, bw, bodyH, c("CYAN"), this.uiLw);
+    let yy = y + this.pad + lh / 2;
+    for (const [label, at, anchor] of cols) this.text(label, bx + at * bw, yy, small, c("CYAN"), anchor);
+    yy += lh;
+    const row = (r, rank) => {
+      const me = st.user && r.uid === st.user.uid, col = me ? c("YELLOW") : c("WHITE");
+      const vals = [String(rank), r.name, Number(r.score).toLocaleString("en-US"), `LV${r.level >= 0 ? "+" : ""}${r.level}`,
+        String(r.difficulty || "").toUpperCase(), r.date || ""];
+      cols.forEach(([, at, anchor], i) => this.text(vals[i], bx + at * bw, yy, small, i === 2 ? (me ? c("YELLOW") : c("GREEN")) : col, anchor));
+      yy += lh;
+    };
+    if (b.loading) this.text("CONNECTING" + ".".repeat(ci(this.t * 3) % 4), cx, yy + lh, small, c("YELLOW"), "center");
+    else if (b.error) this.text(b.error, cx, yy + lh, small, c("RED"), "center");
+    else if (!rows.length) this.text("NO SCORES YET - PLAY ENDLESS MODE AND BE THE FIRST", cx, yy + lh, small, c("WHITE_DIM"), "center");
+    rows.forEach((r, i) => row(r, i + 1));
+    if (b.mine && b.mine.rank > rows.length) {
+      this.text("...", bx + cols[1][1] * bw, yy, small, c("WHITE_DIM"), "midleft"); yy += lh;
+      row(b.mine, b.mine.rank);
+    }
+    y += bodyH + ci(12 * u);
+    let note, noteCol = c("WHITE_DIM");
+    if (!st.user) note = "SIGN IN WITH GOOGLE ON THE MAIN MENU TO POST YOUR SCORES";
+    else if (!st.screenName) { note = "SET A SCREEN NAME TO POST YOUR SCORES"; noteCol = c("YELLOW"); }
+    else note = `YOU ARE ${st.screenName}` + (st.best ? `  //  YOUR BEST ${st.best.toLocaleString("en-US")}` : "  //  NO SCORE POSTED YET");
+    this.text(note, cx, y, small, noteCol, "midtop");
+    y += lh;
+    this.text("SCORE = EVACUATED x THREAT (1 + 0.25 PER LEVEL) x DIFFICULTY (EASY 0.75 / HARD 1.5)", cx, y, small, c("WHITE_DIM"), "midtop");
+    y += lh + ci(12 * u);
+    const buttons = [["BACK", () => { this.mode = "menu"; this.menuIndex = this.firstEnabled(); }], ["REFRESH", () => this.openLeaderboard()]];
+    if (st.user) buttons.push([st.screenName ? "CHANGE NAME" : "SET SCREEN NAME", () => this.openNameEntry("leaderboard")]);
+    this.drawButtons(buttons, cx, y);
+  }
+
+  drawNameEntry() {
+    const [W, H] = this.size, u = this.u, cx = W / 2, g = this.ctx, { small, med } = this, lh = this.lineSize(small);
+    const bw = Math.min(ci(760 * u), W - 20), bx = cx - bw / 2;
+    const h = 4 * this.pad + this.lineSize(med) * 3 + lh * 5;
+    let y = Math.max(10, H / 2 - h / 2);
+    box(g, bx, y, bw, h, c("BG"));
+    box(g, bx, y, bw, h, c("YELLOW"), this.uiLw);
+    y += 1.5 * this.pad;
+    this.text(this.store.screenName ? "CHANGE SCREEN NAME" : "CHOOSE A SCREEN NAME", cx, y, med, c("YELLOW"), "midtop");
+    y += this.lineSize(med);
+    this.text("SHOWN NEXT TO YOUR SCORES ON THE ENDLESS LEADERBOARD", cx, y, small, c("WHITE"), "midtop");
+    y += lh;
+    this.text("3-16 CHARACTERS: LETTERS, DIGITS, . _ -", cx, y, small, c("WHITE_DIM"), "midtop");
+    y += lh + this.pad;
+    const fw = ci(bw * 0.6), fh = this.lineSize(med) + ci(10 * u), fx = cx - fw / 2;
+    box(g, fx, y, fw, fh, c("YELLOW"), Math.max(2, this.uiLw - 1));
+    this.text(">", fx + ci(10 * u), y + fh / 2, med, c("YELLOW"), "midleft");
+    // the real <input> sits over the field (canvas px -> CSS px)
+    const r = this.cv.getBoundingClientRect(), k = r.width / this.cv.width, left = fx + ci(10 * u) + this.textWidth("> ", med);
+    Object.assign(this.nameInput.style, { left: `${r.left + left * k}px`, top: `${r.top + y * k}px`, width: `${(fx + fw - left - ci(10 * u)) * k}px`,
+      height: `${fh * k}px`, fontSize: `${med * k}px`, lineHeight: `${fh * k}px` });
+    y += fh + ci(10 * u);
+    if (this.nameError) this.text(this.nameError, cx, y, small, c("RED"), "midtop");
+    else if (this.nameBusy) this.text("CHECKING" + ".".repeat(ci(this.t * 3) % 4), cx, y, small, c("YELLOW"), "midtop");
+    y += lh + ci(10 * u);
+    this.drawButtons([["SAVE", () => this.saveName()], [this.store.screenName ? "CANCEL" : "LATER", () => this.closeNameEntry()]], cx, y);
+  }
+
   // ---- training -------------------------------------------------------------------
 
   /** Split text into lines no wider than `w` at font size `px`. */
@@ -1558,11 +1749,14 @@ export class App {
       const res = gm.lastResult;
       if (res) {
         const trend = { 1: "THREAT RISING", 2: "THREAT RISING FAST", [-1]: "THREAT EASING" }[res.change] || "THREAT HOLDING";
+        lines.push([`SCORE ${res.score.toLocaleString("en-US")}`, med, c("YELLOW")],
+          [`${gm.rescued} EVACUATED x${K.threatMultiplier(res.played)} THREAT x${K.SCORE_DIFFICULTY[gm.difficulty] ?? 1} ${gm.difficulty.toUpperCase()}`, small, c("WHITE_DIM")]);
+        if (this.scoreStatus) lines.push([this.scoreStatus, small, this.scoreStatus.startsWith("NEW") ? c("YELLOW") : c("CYAN")]);
         lines.push([`${trend}: LV${res.level >= 0 ? "+" : ""}${res.level}`, med, c("YELLOW")],
           [`NEXT: ${(res.next.infected * 100).toFixed(1)}% INFECTED  POP ${res.next.population}  CP ${res.next.cp}`, small, c("WHITE")]);
       }
       lines.push(["R RESTART   N NEW CITY   ESC MENU", small, c("WHITE_DIM")]);
-      buttons = [["RESTART", () => { gm.reset(); this.cancel(); }], ["NEW CITY", () => this.newCity()]];
+      buttons = [["RESTART", () => { gm.reset(); this.cancel(); }], ["NEW CITY", () => this.newCity()], ["LEADERBOARD", () => this.openLeaderboard()]];
     }
     buttons.push(["MENU", () => this.openMenu()]);
     this.drawBox(lines, buttons);

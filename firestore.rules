@@ -1,12 +1,45 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+
     // Each player can read and write only their own save.
     match /users/{uid} {
-      allow read, delete: if request.auth != null && request.auth.uid == uid;
-      allow create, update: if request.auth != null && request.auth.uid == uid
+      allow read, delete: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid
         && request.resource.size() < 200000;
     }
+
+    // Screen names: the document id is the name (upper case), owned by one uid.
+    // A player can only claim the name their own profile points to, so each
+    // player holds at most one name.
+    match /screenNames/{name} {
+      allow read: if true;
+      allow create: if signedIn() && name.matches('^[A-Z0-9_.-]{3,16}$')
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.screenName == name;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // Endless leaderboard: one entry per player, publicly readable. The name
+    // must be a screen name that player owns, and the score can only go up.
+    match /leaderboard/{uid} {
+      allow read: if true;
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name', 'score', 'level', 'difficulty', 'city', 'date', 'updated'])
+        && request.resource.data.name is string
+        && getAfter(/databases/$(database)/documents/screenNames/$(request.resource.data.name)).data.uid == uid
+        && request.resource.data.score is int
+        && request.resource.data.score >= 0 && request.resource.data.score <= 100000
+        && request.resource.data.level is int
+        && request.resource.data.difficulty in ['easy', 'medium', 'hard']
+        && request.resource.data.city is string && request.resource.data.city.size() <= 60
+        && request.resource.data.date is string && request.resource.data.date.size() <= 10
+        && (resource == null || request.resource.data.score >= resource.data.score);
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

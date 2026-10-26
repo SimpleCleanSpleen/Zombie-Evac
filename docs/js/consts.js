@@ -44,6 +44,15 @@ export function applyDifficulty(params, difficulty) {
   return { ...params, infected: Math.min(0.5, params.infected * d.infected), cp: Math.round(params.cp * d.cp) };
 }
 
+// Endless leaderboard score: people evacuated, worth more at a higher threat
+// level (the level the match was played at) and on harder difficulties.
+export const SCORE_DIFFICULTY = { easy: 0.75, medium: 1.0, hard: 1.5 };
+export const threatMultiplier = level => Math.max(0.25, 1 + 0.25 * level);
+export function endlessScore(rescued, level, difficulty) {
+  return Math.round(rescued * threatMultiplier(level) * (SCORE_DIFFICULTY[difficulty] ?? 1));
+}
+export const SCREEN_NAME = /^[A-Z0-9_.-]{3,16}$/;
+
 export const CIV_INDOOR = 0.7;
 export const EMPTY_BUILDING_SHARE = 0.35;
 export const ZOMBIE_INDOOR = 0.35;
@@ -212,7 +221,7 @@ export function setPalette(colorblind) {
   [COL.RED, COL.GREEN] = colorblind ? PALETTE_CB : PALETTE_STD;
   COL.PARK = mix(COL.BG, COL.GREEN, 0.12);
 }
-COL.VIP = COL.CYAN;
+COL.VIP = [0x4f, 0x9d, 0xff];   // bright blue: stands apart from every civilian / zombie palette
 COL.BUILDING = mix(COL.BG, COL.CYAN, 0.10);
 COL.LOT_LINE = mix(COL.BG, COL.CYAN, 0.40);
 COL.PARK = mix(COL.BG, COL.GREEN, 0.12);

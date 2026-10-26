@@ -2079,10 +2079,12 @@ export class Game {
     if (this.mission) return this.checkMission(nCiv, nZ);
     if (nCiv === 0 || nZ === 0 || this.quiet > K.STALEMATE_TIME) {
       this.finish(null, "");
-      const evacPct = 100 * this.rescued / Math.max(1, this.totalHealthy);
+      const evacPct = 100 * this.rescued / Math.max(1, this.totalHealthy), played = this.progress.level;
       const change = this.progress.record(this.city.name, evacPct, this.difficulty);
+      const score = K.endlessScore(this.rescued, played, this.difficulty);
       if (change) this.sound(change > 0 ? "threat_up" : "threat_down");
-      this.lastResult = { evacPct, change, next: K.applyDifficulty(this.progress.params(), this.difficulty), level: this.progress.level };
+      this.lastResult = { evacPct, change, next: K.applyDifficulty(this.progress.params(), this.difficulty), level: this.progress.level,
+        played, score };
     }
   }
 
