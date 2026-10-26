@@ -903,7 +903,7 @@ export class Game {
     return { placed, seal, skipped, ends: [a, b] };
   }
 
-  standby(kind) { return Math.max(0, (K.UNLOCK_TIMES[kind] || 0) - this.runTime); }
+  standby(kind) { return this.mission?.unlock_all ? 0 : Math.max(0, (K.UNLOCK_TIMES[kind] || 0) - this.runTime); }
 
   toolLocked(kind) {
     const wait = this.standby(kind);
@@ -913,7 +913,7 @@ export class Game {
       return true;
     }
     if (this.disabled.has(kind)) {
-      this.flashMessage(`${K.UNIT_SPECS[kind].name} not authorised in this mission`);
+      this.flashMessage(`${K.UNIT_SPECS[kind].name} not ${this.mission?.tutorial ? "part of this lesson" : "authorised in this mission"}`);
       return true;
     }
     return false;
@@ -1229,7 +1229,7 @@ export class Game {
       this.terrainDirty = false;
       this.lastRepath = this.runTime;
     }
-    for (const [t, what] of K.UNLOCK_NEWS) {
+    if (!this.mission?.tutorial) for (const [t, what] of K.UNLOCK_NEWS) {
       if (this.runTime < t && t <= this.runTime + dt) {
         this.flashMessage(`${what} NOW AVAILABLE`, 4);
         this.sound("ui_unlock", `vo_unlock_${t}`);
@@ -2095,6 +2095,7 @@ export class Game {
   checkMission(nCiv, nZ) {
     const g = this.goal, need = this.saveTarget(), vipsOk = this.vipRescued >= this.vipTotal;
     if (this.vipTotal && this.vipLost) return this.finish(false, "VIP LOST");
+    if (this.mission.tutorial) return;   // the lesson's steps decide the outcome
     if ("max_collateral" in g && this.casualties > g.max_collateral) return this.finish(false, "COLLATERAL LIMIT EXCEEDED");
     if ("hold_min" in g && nCiv + this.rescued < g.hold_min * this.totalHealthy) return this.finish(false, "THE CITY HAS FALLEN");
     if ("survive" in g) {

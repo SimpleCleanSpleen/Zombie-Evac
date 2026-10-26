@@ -1,4 +1,5 @@
-// Saved progress: options, Endless threat level / history, Story campaign.
+// Saved progress: options, Endless threat level / history, Story campaign,
+// finished training lessons.
 // Always kept in localStorage; when signed in with Google it is also
 // synced to Firestore (users/{uid}) so it follows the player anywhere.
 import { DEFAULT_OPTIONS, CAMPAIGN } from "./consts.js";
@@ -8,7 +9,7 @@ const LOCAL_KEY = "zombie-evac-save-v1";
 const SDK = "https://www.gstatic.com/firebasejs/10.12.2";
 
 function blank() {
-  return { options: { ...DEFAULT_OPTIONS }, progress: { level: 0, history: [] }, campaign: null };
+  return { options: { ...DEFAULT_OPTIONS }, progress: { level: 0, history: [] }, campaign: null, tutorials: [] };
 }
 
 function validCampaign(c) {
@@ -22,6 +23,7 @@ function clean(d) {
     Object.assign(out.options, d.options || {});
     if (d.progress) out.progress = { level: d.progress.level | 0, history: Array.isArray(d.progress.history) ? d.progress.history.slice(-50) : [] };
     out.campaign = validCampaign(d.campaign);
+    if (Array.isArray(d.tutorials)) out.tutorials = d.tutorials.filter(id => typeof id === "string").slice(0, 50);
   }
   return out;
 }
@@ -43,6 +45,13 @@ export class Store {
   get progress() { return this.data.progress; }
   get campaign() { return this.data.campaign; }
   set campaign(c) { this.data.campaign = validCampaign(c); this.save(); }
+  get tutorials() { return this.data.tutorials; }
+
+  completeTutorial(id) {
+    if (this.data.tutorials.includes(id)) return;
+    this.data.tutorials.push(id);
+    this.save();
+  }
 
   onChange(fn) { this.listeners.push(fn); }
   emit() { for (const fn of this.listeners) fn(); }
@@ -137,7 +146,8 @@ export class Store {
 }
 
 /** Combine this device's save with the cloud one: the furthest campaign
- *  progress wins, and the Endless record with more matches played. */
+ *  progress wins, finished lessons add up, and the Endless record with more
+ *  matches played. */
 function merge(local, cloud) {
   const out = clean(cloud);
   const a = local.campaign, b = cloud.campaign;
@@ -147,6 +157,7 @@ function merge(local, cloud) {
       completed: [...new Set([...(a ? a.completed : []), ...(b ? b.completed : [])])],
     };
   }
+  out.tutorials = [...new Set([...local.tutorials, ...out.tutorials])];
   if (local.progress.history.length > cloud.progress.history.length) out.progress = local.progress;
   return out;
 }

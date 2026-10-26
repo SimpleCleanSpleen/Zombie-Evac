@@ -5,6 +5,7 @@ import { loadCity } from "./city.js";
 import { Game, Progression } from "./game.js";
 import { cellIndex, clamp, hypot } from "./grid.js";
 import { Audio } from "./audio.js";
+import { TUTORIALS, Tutor } from "./tutorial.js";
 
 const { GW, CELL, WORLD_W, WORLD_H, CIV, ZOMBIE, DEAD } = K;
 const FONT = '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", "Ubuntu Mono", Consolas, Menlo, "Courier New", monospace';
@@ -112,6 +113,7 @@ export class App {
     this.dragInfo = null;
     this.t = 0; this.animT = 0; this.frameNo = 0;
     this.storyIndex = null;
+    this.tutorialIndex = null; this.tutor = null; this.tutorBox = null;
     this.loading = null;
     this.briefingError = null;
     this.handledResult = null;
@@ -172,6 +174,7 @@ export class App {
     })) : loadCity(slug);
     load.then(city => {
       this.loading = null;
+      if (mission?.tutorial) city.name = mission.location;
       this.setCity(city, mission, mission ? null : Math.floor(Math.random() * 2 ** 30));
     }).catch(e => {
       this.loading = null;
@@ -188,14 +191,14 @@ export class App {
   }
 
   startEndless() {
-    this.storyIndex = null;
+    this.storyIndex = null; this.tutorialIndex = null; this.tutor = null;
     this.mode = "game"; this.inGame = true;
     this.loadMap(this.randomProcedural(this.game.city.slug), null, "PROCEDURAL");
   }
 
   startStory(i) {
     const m = CAMPAIGN[i];
-    this.storyIndex = i;
+    this.storyIndex = i; this.tutorialIndex = null; this.tutor = null;
     this.mode = "briefing";
     this.uiSound("ui_briefing");
     if (this.game.mission !== m) this.loadMap(m.map, m, m.location);
@@ -203,6 +206,41 @@ export class App {
 
   briefingReady() {
     return this.storyIndex !== null && !this.loading && this.game.mission === CAMPAIGN[this.storyIndex];
+  }
+
+  startTutorial(i) {
+    const m = TUTORIALS[i];
+    this.storyIndex = null;
+    this.tutorialIndex = i; this.tutor = new Tutor(m);
+    this.mode = "game"; this.inGame = true;
+    this.selected = "evac";
+    if (this.game.mission === m) { this.game.reset(); this.cancel(); }
+    else this.loadMap(m.map, m, m.location);
+  }
+
+  /** Run the current lesson's steps; the lesson ends the match when it is done or can't be. */
+  updateTutor() {
+    const g = this.game, tu = this.tutor;
+    if (!tu || g.mission !== tu.lesson || g.phase === "over" || this.loading) return;
+    const fail = tu.update(g, this, this.t);
+    if (fail) return g.finish(false, fail);
+    if (tu.finished) return g.finish(true, "LESSON COMPLETE");
+    if (tu.justDone) this.uiSound("ui_unlock");
+    if (tu.shownAt === this.t) this.uiSound("ui_briefing");
+  }
+
+  tutorNext() {
+    const tu = this.tutor;
+    if (!tu || !tu.next(this.game, this.t)) return false;
+    this.uiSound("ui_select");
+    if (tu.finished) this.game.finish(true, "LESSON COMPLETE");
+    else this.uiSound("ui_briefing");
+    return true;
+  }
+
+  tutorActive() {
+    const tu = this.tutor, g = this.game;
+    return !!tu && g.mission === tu.lesson && !this.loading && g.phase !== "over" && !tu.finished;
   }
 
   newStory() {
@@ -222,6 +260,10 @@ export class App {
   handleMissionResult() {
     const g = this.game;
     this.handledResult = g.result;
+    if (g.mission.tutorial) {
+      if (g.result && g.result.success) this.store.completeTutorial(g.mission.id);
+      return;
+    }
     if (g.result && g.result.success) {
       const save = this.store.campaign || { mission: 0, completed: [] };
       if (!save.completed.includes(g.mission.id)) save.completed.push(g.mission.id);
@@ -357,13 +399,22 @@ export class App {
 
   // ---- menu ---------------------------------------------------------------
 
+  inMenu() { return this.mode === "menu" || this.mode === "options" || this.mode === "tutorials"; }
+
   menuItems() {
+    if (this.mode === "tutorials") {
+      const done = this.store.tutorials;
+      return [...TUTORIALS.map((t, i) => [`${done.includes(t.id) ? "[X]" : "[ ]"} ${i + 1}. ${t.title}`, `lesson:${i}`, true]),
+        ["BACK", "back", true]];
+    }
     const save = this.store.campaign, items = [];
     if (this.inGame) items.push(["RESUME", "resume", true]);
     if (save) items.push([`CONTINUE - M${save.mission + 1} ${CAMPAIGN[save.mission].title}`, "continue", true]);
     else items.push(["CONTINUE", "continue", false]);
     items.push([this.confirmNew ? "CONFIRM: ERASE STORY SAVE?" : "NEW GAME - STORY MODE", "story", true]);
-    items.push(["ENDLESS MODE", "endless", true], ["CONTROLS", "controls", true], ["OPTIONS", "options", true]);
+    const fresh = !save && !this.store.tutorials.length;
+    items.push(["ENDLESS MODE", "endless", true], [fresh ? "TUTORIALS - START HERE" : "TUTORIALS", "tutorials", true],
+      ["CONTROLS", "controls", true], ["OPTIONS", "options", true]);
     const st = this.store;
     if (st.user) items.push(["SIGN OUT", "signout", true]);
     else items.push(["SIGN IN WITH GOOGLE", "signin", st.ready]);
@@ -384,6 +435,12 @@ export class App {
     } else if (action === "endless") this.startEndless();
     else if (action === "options") { this.mode = "options"; this.menuIndex = 0; }
     else if (action === "controls") this.mode = "controls";
+    else if (action === "tutorials") {
+      this.mode = "tutorials";
+      const next = TUTORIALS.findIndex(t => !this.store.tutorials.includes(t.id));
+      this.menuIndex = Math.max(0, next);
+    } else if (action === "back") { this.mode = "menu"; this.menuIndex = this.firstEnabled(); }
+    else if (action.startsWith("lesson:")) this.startTutorial(Number(action.slice(7)));
     else if (action === "signin") this.store.signIn();
     else if (action === "signout") this.store.signOut();
   }
@@ -441,6 +498,7 @@ export class App {
     } else if (k === "Escape") {
       this.uiSound("ui_back");
       if (options) this.leaveOptions();
+      else if (this.mode === "tutorials") { this.mode = "menu"; this.menuIndex = this.firstEnabled(); }
       else if (this.inGame) this.mode = "game";
     }
     if (this.menuIndex !== before) this.uiSound("ui_hover");
@@ -482,12 +540,18 @@ export class App {
       g.setSpeed(k === "f" || k === "F" ? SPEEDS[(i + 1) % SPEEDS.length] : SPEEDS[Math.min(i + 1, SPEEDS.length - 1)]);
     } else if (k === "-" || k === "_") g.setSpeed(SPEEDS[Math.max(SPEEDS.indexOf(g.timeScale) - 1, 0)]);
     else if ((k === "r" || k === "R") && !ctrl) { g.reset(); this.cancel(); }
+    else if (k === "Enter" && g.phase !== "over" && this.tutorActive() && this.tutor.waiting) this.tutorNext();
     else if (k === "Enter" && story && g.phase === "over") this.nextOrRetry();
     else if ((k === "n" || k === "N") && !story && !ctrl) this.newCity();
   }
 
   nextOrRetry() {
     const g = this.game;
+    if (this.tutorialIndex !== null) {
+      if (g.result && g.result.success && this.tutorialIndex + 1 < TUTORIALS.length) this.startTutorial(this.tutorialIndex + 1);
+      else { g.reset(); this.cancel(); }
+      return;
+    }
     if (g.result && g.result.success && this.storyIndex + 1 < CAMPAIGN.length) this.startStory(this.storyIndex + 1);
     else { g.reset(); this.cancel(); }
   }
@@ -570,7 +634,7 @@ export class App {
       this.mouse = p;
       this.cv.setPointerCapture?.(e.pointerId);
       if (!this.game) return;
-      if (this.mode === "menu" || this.mode === "options") return this.menuPointer("down", p);
+      if (this.inMenu()) return this.menuPointer("down", p);
       if (this.mode === "controls") { this.mode = "menu"; return; }
       if (this.mode === "briefing") {
         if (this.briefingReady()) { this.mode = "game"; this.inGame = true; }
@@ -583,6 +647,7 @@ export class App {
         if (b) { this.uiSound("ui_select"); b.action(); }
         return;
       }
+      if (this.tutorBox && this.tutorActive() && this.tutor.waiting && this.inRect(p, this.tutorBox)) { this.tutorNext(); return; }
       if (p[0] >= this.panelX) { if (e.button === 0) this.clickPanel(p); return; }
       const w = this.screenToWorld(p);
       if (!w) return;
@@ -601,7 +666,7 @@ export class App {
     this.cv.addEventListener("pointermove", e => {
       const p = pos(e);
       this.mouse = p;
-      if (this.mode === "menu" || this.mode === "options") return this.menuPointer("move", p);
+      if (this.inMenu()) return this.menuPointer("move", p);
       if (this.press && hypot(p[0] - this.press.p[0], p[1] - this.press.p[1]) > 14 * this.u) { clearTimeout(this.press.timer); this.press = null; }
       if (this.lurePath) {
         const w = this.screenToWorld(p, true), last = this.lurePath[this.lurePath.length - 1];
@@ -610,7 +675,7 @@ export class App {
     });
     const up = e => {
       const p = pos(e);
-      if (this.mode === "menu" || this.mode === "options") return this.menuPointer("up", p);
+      if (this.inMenu()) return this.menuPointer("up", p);
       if (!this.game || this.mode !== "game") return;
       if (this.press) { clearTimeout(this.press.timer); const w = this.press.w; this.press = null; this.leftClick(w); }
       if (e.button !== 0 && e.pointerType !== "touch") return;
@@ -633,7 +698,7 @@ export class App {
       if (e.key === " " || (e.ctrlKey && ["a", "z", "A", "Z"].includes(e.key))) e.preventDefault();
       if (this.mode === "controls") {
         if (["Escape", "Enter", " ", "Backspace"].includes(e.key)) this.mode = "menu";
-      } else if (this.mode === "menu" || this.mode === "options") this.menuKey(e);
+      } else if (this.inMenu()) this.menuKey(e);
       else if (this.mode === "briefing") {
         if (e.key === "Escape") this.openMenu();
         else if (e.key === "Enter" || e.key === " ") {
@@ -662,6 +727,7 @@ export class App {
     if (g && this.mode === "game") {
       g.advance(dt);
       if (g.phase === "running" && !g.paused) this.animT += dt * g.timeScale;
+      this.updateTutor();
       if (g.phase === "over" && g.mission && g.result !== this.handledResult) this.handleMissionResult();
     }
     if (g) {
@@ -708,7 +774,9 @@ export class App {
     this.drawCctvHud();
     this.drawPanel();
     const mr = this.mapRect, gm = this.game;
-    if (this.mode === "menu" || this.mode === "options" || this.mode === "controls" || this.mode === "briefing") {
+    if (this.mode === "game" && gm.phase !== "over" && this.tutorActive()) this.drawTutor();
+    else this.tutorBox = null;
+    if (this.inMenu() || this.mode === "controls" || this.mode === "briefing") {
       g.fillStyle = c("BG", 215 / 255); g.fillRect(0, 0, W, H);
       if (this.mode === "controls") this.drawControls();
       else if (this.mode === "briefing") this.drawBriefing();
@@ -750,8 +818,9 @@ export class App {
     let y = ci(H * 0.1);
     this.text("ZOMBIE EVAC", cx, y, title, c("WHITE"), "midtop");
     y += this.lineSize(title);
-    this.text(options ? "OPTIONS" : "OUTBREAK RESPONSE COMMAND // CCTV LINK", cx, y, options ? this.med : this.small,
-      options ? c("YELLOW") : c("WHITE_DIM"), "midtop");
+    const training = this.mode === "tutorials", heading = options ? "OPTIONS" : training ? "TRAINING" : null;
+    this.text(heading || "OUTBREAK RESPONSE COMMAND // CCTV LINK", cx, y, heading ? this.med : this.small,
+      heading ? c("YELLOW") : c("WHITE_DIM"), "midtop");
     y += ci(this.lineSize(this.med) * 1.8);
     const bw = Math.min(ci(560 * u), W - 20), bh = this.lineSize(this.med) + ci(14 * u), gap = ci(10 * u);
     this.menuRects = []; this.optionBars = {};
@@ -792,6 +861,13 @@ export class App {
         this.text(label, r.x + r.w / 2, r.y + r.h / 2, label.length < 28 ? this.med : this.small, col, "center");
         y += bh + gap;
       });
+      if (training) {
+        const t = TUTORIALS[this.menuIndex];
+        if (t) this.text(t.summary, cx, y + gap, this.small, c("CYAN"), "midtop");
+        this.text("UP/DOWN SELECT   ENTER START   ESC BACK", cx, H - ci(60 * u), this.small, c("WHITE_DIM"), "midbottom");
+        this.text(`${this.store.tutorials.length}/${TUTORIALS.length} LESSONS COMPLETE`, cx, H - ci(30 * u), this.small, c("WHITE_DIM"), "midbottom");
+        return;
+      }
       const st = this.store;
       const who = st.user ? `SIGNED IN: ${st.user.name.toUpperCase()}` : "GUEST - PROGRESS SAVED ON THIS DEVICE ONLY";
       this.text(who + (st.status && st.user ? `  // ${st.status}` : ""), cx, y + gap, this.small, st.user ? c("CYAN") : c("WHITE_DIM"), "midtop");
@@ -1294,7 +1370,7 @@ export class App {
     const { big, med, small } = this;
     this.text("ZOMBIE EVAC", left, this.titleY, big, c("WHITE"));
     const lv = this.progress.level, diff = gm.difficulty === "medium" ? "" : gm.difficulty.toUpperCase() + " ";
-    const level = gm.mission ? "" : (lv ? `LV${lv > 0 ? "+" : ""}${lv}` : "LV 0");
+    const level = gm.mission ? (gm.mission.tutorial ? "TRAINING" : "") : (lv ? `LV${lv > 0 ? "+" : ""}${lv}` : "LV 0");
     this.text((diff + level).trim() || "MENU", right, this.titleY + this.lineSize(big) / 2, small, c("YELLOW"), "midright");
     this.text(`CP ${ci(gm.cp)}`, left, this.cpY, med, c("YELLOW"));
     this.text(`T+${ci(gm.runTime / 60)}:${String(ci(gm.runTime % 60)).padStart(2, "0")}`, right, this.cpY, med, c("WHITE"), "topright");
@@ -1378,6 +1454,63 @@ export class App {
     else this.text(gm.city.name, left, y, small, c("WHITE_DIM"));
   }
 
+  // ---- training -------------------------------------------------------------------
+
+  /** Split text into lines no wider than `w` at font size `px`. */
+  wrap(text, px, w) {
+    const out = [];
+    let line = "";
+    for (const word of text.split(" ")) {
+      const next = line ? line + " " + word : word;
+      if (line && this.textWidth(next, px) > w) { out.push(line); line = word; } else line = next;
+    }
+    if (line) out.push(line);
+    return out;
+  }
+
+  /** The instructor's terminal at the foot of the map, typed out, plus a flashing frame on the control to use. */
+  drawTutor() {
+    const tu = this.tutor, step = tu.current, gm = this.game, g = this.ctx, mr = this.mapRect, u = this.u;
+    const { small, pad } = this, gap = ci(6 * u), lh = this.lineSize(small);
+    const width = Math.min(mr.w - 2 * pad, ci(900 * u)), inner = width - 2 * pad;
+    const body = step.say.flatMap(t => this.wrap(t, small, inner));
+    const typed = Math.floor((this.t - tu.shownAt) * 160);
+    let footer, footCol = c("YELLOW");
+    if (typed < body.join("").length) footer = "";
+    else if (!step.done) { footer = "ENTER / CLICK HERE: CONTINUE"; footCol = this.blink(1.5) ? c("YELLOW") : c("WHITE"); }
+    else footer = step.progress ? "> " + step.progress(gm) : "> AWAITING ORDERS_";
+    const height = 2 * pad + lh + gap + body.length * lh + gap + lh;
+    const r = { x: mr.x + (mr.w - width) / 2, y: mr.y + mr.h - height - pad - lh, w: width, h: height };
+    this.tutorBox = r;
+    box(g, r.x, r.y, r.w, r.h, c("BG", 235 / 255));
+    box(g, r.x, r.y, r.w, r.h, c("YELLOW"), this.uiLw);
+    let y = r.y + pad;
+    const n = this.tutorialIndex;
+    this.text(`TRAINING ${n + 1}/${TUTORIALS.length} // ${tu.lesson.title}`, r.x + pad, y, small, c("CYAN"));
+    this.text(`STEP ${tu.step + 1}/${tu.lesson.steps.length}`, r.x + r.w - pad, y, small, c("WHITE_DIM"), "topright");
+    y += lh + gap;
+    let left = typed;
+    for (const line of body) {
+      const shown = line.slice(0, Math.max(0, left));
+      left -= line.length;
+      const cursor = left < 0 && left > -line.length && this.blink(3) ? "_" : "";
+      if (shown || cursor) this.text(shown + cursor, r.x + pad, y, small, c("WHITE"));
+      y += lh;
+    }
+    if (footer) this.text(footer, r.x + pad, y + gap, small, footCol);
+    if (step.focus && this.blink(2)) {
+      const rects = step.focus === "play" ? this.timeButtons.filter(([v]) => v === "pause").map(([, b]) => b)
+        : step.focus === "speed" ? this.timeButtons.filter(([v]) => typeof v === "number").map(([, b]) => b)
+        : step.focus === "undo" ? this.timeButtons.filter(([v]) => v === "undo").map(([, b]) => b)
+        : this.unitButtons[step.focus] ? [this.unitButtons[step.focus]] : [];
+      if (rects.length) {
+        const x0 = Math.min(...rects.map(b => b.x)), y0 = Math.min(...rects.map(b => b.y));
+        const x1 = Math.max(...rects.map(b => b.x + b.w)), y1 = Math.max(...rects.map(b => b.y + b.h)), m = this.uiLw + 2;
+        box(g, x0 - m, y0 - m, x1 - x0 + 2 * m, y1 - y0 + 2 * m, c("YELLOW"), this.uiLw);
+      }
+    }
+  }
+
   // ---- debrief ------------------------------------------------------------------
 
   drawGameOver() {
@@ -1389,7 +1522,23 @@ export class App {
     const infectedOut = `INFECTED FLOWN OUT ${gm.carriedOut}  CHOPPERS LOST ${gm.trojans}  SICK STOPPED AT LZS ${gm.screened}`;
     const traffic = `CARS ESCAPED ${gm.carsEscaped}  CRASHED ${gm.carCrashes}  RUN OVER ${gm.roadkill}  DROWNED ${gm.drowned}`;
     let lines, buttons;
-    if (gm.mission) {
+    if (gm.mission?.tutorial) {
+      const ok = gm.result && gm.result.success, i = this.tutorialIndex, more = i !== null && i + 1 < TUTORIALS.length;
+      lines = [[`LESSON ${i + 1}: ` + (ok ? "COMPLETE" : "FAILED"), big, ok ? c("YELLOW") : c("RED")],
+        [ok ? gm.mission.title : gm.result ? gm.result.reason : "", med, c("WHITE")],
+        [`EVACUATED ${gm.rescued}  INFECTED ${gm.infected}  COLLATERAL ${gm.casualties}  ZOMBIES DOWN ${gm.kills}`, small, c("WHITE_DIM")]];
+      if (ok && more) {
+        lines.push([`NEXT: ${TUTORIALS[i + 1].title}`, small, c("CYAN")], ["ENTER: NEXT LESSON   R: REPLAY   ESC: MENU", small, c("YELLOW")]);
+        buttons = [["NEXT LESSON", () => this.nextOrRetry()], ["REPLAY", () => { gm.reset(); this.cancel(); }]];
+      } else if (ok) {
+        lines.push(["TRAINING COMPLETE - STORY MODE IS WAITING", small, c("YELLOW")], ["R: REPLAY   ESC: MENU", small, c("WHITE_DIM")]);
+        buttons = [["REPLAY", () => { gm.reset(); this.cancel(); }]];
+      } else {
+        lines.push(["R / ENTER: RETRY   ESC: MENU", small, c("YELLOW")]);
+        buttons = [["RETRY", () => { gm.reset(); this.cancel(); }]];
+      }
+      buttons.push(["LESSONS", () => { this.openMenu(); this.menuActivate("tutorials"); }]);
+    } else if (gm.mission) {
       const ok = gm.result && gm.result.success, more = this.storyIndex !== null && this.storyIndex + 1 < CAMPAIGN.length;
       lines = [[`MISSION ${this.storyIndex + 1}: ` + (ok ? "COMPLETE" : "FAILED"), big, ok ? c("YELLOW") : c("RED")],
         [gm.result ? gm.result.reason : "", med, c("WHITE")],

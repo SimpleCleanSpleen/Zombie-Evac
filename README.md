@@ -10,6 +10,8 @@ to get as many people out as you can.
 - **Story mode:** 11 missions on real cities (Clarksville, Baltimore, Washington DC,
   Times Square, Shibuya, Paris, London, Venice, Pyongyang, Shanghai...).
 - **Endless mode:** procedural cities with dynamic difficulty.
+- **Tutorials:** six guided lessons (evacuation, barricades, infantry, support troops,
+  fire support, choppers and VIPs) that walk through every tool step by step.
 - **Sign in with Google** to keep your campaign, threat level and options in the cloud.
   Without signing in, progress is kept in the browser.
 
@@ -38,6 +40,7 @@ to get as many people out as you can.
   - `js/game.js` the simulation (struct-of-arrays agents, flow-field pathfinding,
     boids hordes, traffic, trains, units, economy, missions)
   - `js/app.js` rendering (Canvas 2D, bloom, CRT overlay), panel, menus, input
+  - `js/tutorial.js` the training lessons and the step-by-step instructor
   - `js/store.js` saves: localStorage, plus Firestore when signed in
   - `js/audio.js` terminal-style sound: CC0 samples in `sfx/` through a small-speaker
     filter, over a CRT hum (music volume), with synth fallbacks
