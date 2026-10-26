@@ -4,6 +4,8 @@
 // something; a step without one is read and dismissed with ENTER / a click.
 // `focus` names the panel control to flash: a unit kind, "play", "speed" or "undo".
 // `fail` returns a reason when the step can no longer be completed.
+// In `say`, {CIV} and {ZED} become the colour words for civilians and the
+// infected in the active palette (it changes with the colour-blind option).
 // `begin` snapshots game state when the step starts; `done` gets it as its third argument.
 import { REINFORCE_RADIUS } from "./consts.js";
 import { hypot } from "./grid.js";
@@ -20,15 +22,16 @@ export const TUTORIALS = [
   {
     id: "t1_evac", title: "EVACUATION BASICS", map: "proc_1037232204",
     summary: "LANDING ZONES, THE CLOCK, GAME SPEED",
-    population: 1500, infected: 0.03, ground_zeros: 1, cp: 300, goal: {},
+    population: 1500, infected: 0.03, ground_zeros: 1, goal: {},
     disabled: ["barricade", "mine", "infantry", "engineer", "sniper", "artillery", "chopper", "airstrike", "bombing", "lure"],
     steps: [
       { say: ["WELCOME, COMMANDER. THIS IS A LIVE CCTV FEED OF A CITY IN THE FIRST MINUTES OF AN OUTBREAK.",
-        "GREEN DOTS ARE CIVILIANS. RED DOTS ARE THE INFECTED. EVERY CIVILIAN A ZOMBIE TOUCHES BECOMES ONE."] },
+        "{CIV} DOTS ARE CIVILIANS. {ZED} DOTS ARE THE INFECTED. EVERY CIVILIAN A ZOMBIE TOUCHES BECOMES ONE."] },
       { say: ["THE CLOCK IS STOPPED. NOTHING MOVES UNTIL YOU PRESS PLAY, SO TAKE YOUR TIME.",
-        "YOUR BUDGET IS CP (COMMAND POINTS), TOP OF THE PANEL. EVERY TOOL COSTS CP."] },
+        "EVERY TOOL COSTS CP (COMMAND POINTS), SHOWN AT THE TOP OF THE PANEL, AND EACH PERSON YOU RESCUE EARNS A LITTLE BACK.",
+        "IN TRAINING YOUR CP IS UNLIMITED. IN A REAL OPERATION, SPEND IT CAREFULLY."] },
       { say: ["PEOPLE ONLY SURVIVE IF A HELICOPTER TAKES THEM OUT.",
-        "WITH 1 EVAC LZ SELECTED, CLICK OPEN GROUND - A ROAD, PLAZA OR PARK - AWAY FROM THE RED DOTS."],
+        "WITH 1 EVAC LZ SELECTED, CLICK OPEN GROUND - A ROAD, PLAZA OR PARK - AWAY FROM THE {ZED} DOTS."],
         focus: "evac", done: g => count(g, "evac") >= 1 },
       { say: ["THE BLUE PAD IS A LANDING ZONE. CIVILIANS RUN TO THE NEAREST ONE AND HELICOPTERS LIFT THEM OUT.",
         "PLACE A SECOND LZ IN ANOTHER PART OF THE CITY SO NOBODY HAS TO RUN TOO FAR."],
@@ -46,7 +49,7 @@ export const TUTORIALS = [
   {
     id: "t2_barricades", title: "BARRICADES AND UNDO", map: "proc_393421960",
     summary: "BLOCK STREETS, TAKE BACK MISTAKES",
-    population: 1800, infected: 0.05, ground_zeros: 1, cp: 450, goal: {},
+    population: 1800, infected: 0.05, ground_zeros: 1, goal: {},
     disabled: ["mine", "infantry", "engineer", "sniper", "artillery", "chopper", "airstrike", "bombing", "lure"],
     steps: [
       { say: ["THE INFECTED FOLLOW THE SCENT OF THE LIVING THROUGH THE STREETS.",
@@ -58,7 +61,7 @@ export const TUTORIALS = [
       { say: ["MISTAKES ARE FREE BEFORE THE CLOCK STARTS. PRESS CTRL+Z OR CLICK UNDO TO TAKE THE BARRICADE BACK.",
         "(RIGHT-CLICKING AN ITEM ALSO REMOVES IT, WITH A FULL REFUND UNTIL YOU PRESS PLAY.)"],
         focus: "undo", begin: g => count(g, "barricade"), done: (g, ui, before) => count(g, "barricade") < before },
-      { say: ["NOW BUILD TWO BARRICADES ON STREETS BETWEEN THE RED OUTBREAK AND YOUR LZ."],
+      { say: ["NOW BUILD TWO BARRICADES ON STREETS BETWEEN THE {ZED} OUTBREAK AND YOUR LZ."],
         focus: "barricade", done: g => count(g, "barricade") >= 2 },
       { say: ["START THE CLOCK. ONCE IT RUNS, NEW BARRICADES ARE ONLY BLUEPRINTS UNTIL ENGINEERS BUILD THEM."],
         focus: "play", done: running },
@@ -70,7 +73,7 @@ export const TUTORIALS = [
   {
     id: "t3_infantry", title: "INFANTRY", map: "proc_12429725",
     summary: "DEPLOY, LINK AND MOVE SQUADS",
-    population: 1800, infected: 0.08, ground_zeros: 1, cp: 450, goal: {},
+    population: 1800, infected: 0.08, ground_zeros: 1, goal: {},
     disabled: ["mine", "engineer", "sniper", "artillery", "chopper", "airstrike", "bombing", "lure"],
     steps: [
       { say: ["INFANTRY SQUADS SHOOT ANY INFECTED IN RANGE. THEY ARE YOUR MAIN WAY TO FIGHT BACK."] },
@@ -92,7 +95,7 @@ export const TUTORIALS = [
       { say: ["CTRL+A SELECTS EVERY MOVABLE UNIT AT ONCE. TRY IT."],
         done: (g, ui) => ui.sel.size >= 2 },
       { say: ["PRESS ESC TO DESELECT, THEN START THE CLOCK."], focus: "play", done: running },
-      { say: ["SEND YOUR SQUADS TOWARD THE RED DOTS AND BRING DOWN 25 INFECTED.",
+      { say: ["SEND YOUR SQUADS TOWARD THE {ZED} DOTS AND BRING DOWN 25 INFECTED.",
         "KEEP THEM TOGETHER: A LONE SQUAD CAN BE OVERRUN."],
         progress: g => `ZOMBIES DOWN ${Math.min(g.kills, 25)}/25`, done: g => g.kills >= 25 || zombiesLeft(g) === 0 },
     ],
@@ -100,7 +103,7 @@ export const TUTORIALS = [
   {
     id: "t4_support", title: "SNIPERS, MINES, ENGINEERS", map: "proc_732417712",
     summary: "SUPPORT TROOPS AND LIVE BUILDING",
-    population: 2000, infected: 0.06, ground_zeros: 1, cp: 600, goal: {}, unlock_all: true,
+    population: 2000, infected: 0.06, ground_zeros: 1, goal: {}, unlock_all: true,
     disabled: ["artillery", "chopper", "airstrike", "bombing", "lure"],
     steps: [
       { say: ["IN A REAL OPERATION, SNIPERS AND ENGINEERS ARRIVE AT 0:30 AND MINES AT 1:00 (WATCH THE STBY TIMERS).",
@@ -126,7 +129,7 @@ export const TUTORIALS = [
   {
     id: "t5_fire", title: "FIRE SUPPORT", map: "proc_408797457",
     summary: "ARTILLERY, AIRSTRIKES, BOMB RUNS, LURES",
-    population: 2200, infected: 0.12, ground_zeros: 2, cp: 900, goal: {}, unlock_all: true,
+    population: 2200, infected: 0.12, ground_zeros: 2, goal: {}, unlock_all: true,
     disabled: ["barricade", "mine", "engineer", "sniper", "chopper"],
     steps: [
       { say: ["MAGENTA TOOLS ARE EXPLOSIVE. THEY HIT HARD, BUT THEY KILL CIVILIANS TOO.",
@@ -136,7 +139,7 @@ export const TUTORIALS = [
         "PLACE IT, AND KEEP ITS TARGETS AWAY FROM YOUR LZ."],
         focus: "artillery", done: g => count(g, "artillery") >= 1 },
       { say: ["START THE CLOCK."], focus: "play", done: running },
-      { say: ["9 AIRSTRIKE: ONE HEAVY BLAST TWO SECONDS AFTER YOU CLICK. AIM AT A CLUSTER OF RED."],
+      { say: ["9 AIRSTRIKE: ONE HEAVY BLAST TWO SECONDS AFTER YOU CLICK. AIM AT A CLUSTER OF {ZED}."],
         focus: "airstrike", done: g => used(g, "shell") },
       { say: ["0 BOMB RUN: PRESS, DRAG A LINE AND RELEASE. BOMBS FALL ALL ALONG IT.",
         "GREAT FOR A HORDE MARCHING DOWN A LONG STREET."],
@@ -151,17 +154,17 @@ export const TUTORIALS = [
   {
     id: "t6_choppers", title: "CHOPPERS AND VIPS", map: "proc_1037232204",
     summary: "GUNSHIPS, ESCORTS, PROTECTING VIPS",
-    population: 1800, infected: 0.03, ground_zeros: 1, cp: 500, goal: {}, unlock_all: true,
+    population: 1800, infected: 0.03, ground_zeros: 1, goal: {}, unlock_all: true,
     vips: 2, vip_region: { r_max: 200 },
     disabled: ["barricade", "mine", "engineer", "sniper", "artillery", "airstrike", "bombing", "lure"],
     steps: [
-      { say: ["CYAN DOTS ARE VIPS - PEOPLE COMMAND NEEDS ALIVE. SOME MISSIONS FAIL IF EVEN ONE IS LOST.",
+      { say: ["LARGER GREEN DOTS ARE VIPS - PEOPLE COMMAND NEEDS ALIVE. SOME MISSIONS FAIL IF EVEN ONE IS LOST.",
         "THERE ARE TWO IN THIS CITY."] },
       { say: ["PLACE AN EVAC LZ NEAR THE VIPS SO THEY HAVE A SHORT, SAFE RUN."], focus: "evac", done: g => count(g, "evac") >= 1 },
       { say: ["8 CHOPPER: A GUNSHIP THAT CIRCLES A POINT AND FIRES ON THE INFECTED BELOW.",
         "CLICK TO SET THE CENTRE OF ITS ORBIT."],
         focus: "chopper", done: g => count(g, "chopper") >= 1 },
-      { say: ["CLICK THE CHOPPER TO SELECT IT, THEN CLICK A CYAN VIP. THE CHOPPER WILL FOLLOW AND GUARD THEM.",
+      { say: ["CLICK THE CHOPPER TO SELECT IT, THEN CLICK A GREEN VIP. THE CHOPPER WILL FOLLOW AND GUARD THEM.",
         "(IT CAN ESCORT YOUR GROUND UNITS THE SAME WAY.)"],
         done: g => units(g, "chopper").some(u => u.escort) },
       { say: ["START THE CLOCK."], focus: "play", done: running },
@@ -173,7 +176,7 @@ export const TUTORIALS = [
     ],
   },
 ];
-for (const t of TUTORIALS) { t.tutorial = true; t.location = `TRAINING: ${t.title}`; }
+for (const t of TUTORIALS) { t.tutorial = true; t.unlimited_cp = true; t.location = `TRAINING: ${t.title}`; }
 
 /** Walks the player through one lesson's steps. */
 export class Tutor {

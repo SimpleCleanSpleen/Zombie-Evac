@@ -356,7 +356,7 @@ export class Game {
     this.shells = []; this.bombers = []; this.effects = []; this.fires = []; this.drones = [];
     this.result = null;
     this.history = [];
-    this.cp = this.params.cp;
+    this.cp = m?.unlimited_cp ? 1e9 : this.params.cp;   // (finite, so spending still shows up as a change)
     this.rescued = this.infected = this.casualties = this.kills = 0;
     this.trojans = this.drowned = this.drownedZ = this.carriedOut = this.screened = 0;
     this.sheltered = 0;

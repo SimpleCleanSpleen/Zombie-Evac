@@ -1372,7 +1372,7 @@ export class App {
     const lv = this.progress.level, diff = gm.difficulty === "medium" ? "" : gm.difficulty.toUpperCase() + " ";
     const level = gm.mission ? (gm.mission.tutorial ? "TRAINING" : "") : (lv ? `LV${lv > 0 ? "+" : ""}${lv}` : "LV 0");
     this.text((diff + level).trim() || "MENU", right, this.titleY + this.lineSize(big) / 2, small, c("YELLOW"), "midright");
-    this.text(`CP ${ci(gm.cp)}`, left, this.cpY, med, c("YELLOW"));
+    this.text(gm.mission?.unlimited_cp ? "CP UNLIMITED" : `CP ${ci(gm.cp)}`, left, this.cpY, med, c("YELLOW"));
     this.text(`T+${ci(gm.runTime / 60)}:${String(ci(gm.runTime % 60)).padStart(2, "0")}`, right, this.cpY, med, c("WHITE"), "topright");
     seg(g, left, this.sepY, right, this.sepY, c("CYAN"), blw);
 
@@ -1473,7 +1473,8 @@ export class App {
     const tu = this.tutor, step = tu.current, gm = this.game, g = this.ctx, mr = this.mapRect, u = this.u;
     const { small, pad } = this, gap = ci(6 * u), lh = this.lineSize(small);
     const width = Math.min(mr.w - 2 * pad, ci(900 * u)), inner = width - 2 * pad;
-    const body = step.say.flatMap(t => this.wrap(t, small, inner));
+    const [civ, zed] = this.colorblind ? ["BLUE-GREY", "ORANGE"] : ["YELLOW", "RED"];
+    const body = step.say.flatMap(t => this.wrap(t.replaceAll("{CIV}", civ).replaceAll("{ZED}", zed), small, inner));
     const typed = Math.floor((this.t - tu.shownAt) * 160);
     let footer, footCol = c("YELLOW");
     if (typed < body.join("").length) footer = "";
