@@ -39,6 +39,8 @@ to get as many people out as you can.
     boids hordes, traffic, trains, units, economy, missions)
   - `js/app.js` rendering (Canvas 2D, bloom, CRT overlay), panel, menus, input
   - `js/store.js` saves: localStorage, plus Firestore when signed in
+  - `js/audio.js` terminal-style sound: CC0 samples in `sfx/` through a small-speaker
+    filter, over a CRT hum (music volume), with synth fallbacks
   - `maps/` pre-baked maps
 - `tools/bake_maps.py` builds the maps with the reference `City` class: every real
   map found in `map_cache/` plus a set of procedural cities.
@@ -55,3 +57,4 @@ signed-in player read and write their own document. Deploy rules with
 `firebase deploy --only firestore:rules`.
 
 Map data (c) OpenStreetMap contributors, ODbL.
+Sound effects by Kenney.nl, CC0 (see `docs/sfx/LICENSE.txt`).

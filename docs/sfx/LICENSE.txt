@@ -1,0 +1,9 @@
+Sound effects in this folder are from Kenney.nl (Kenney Vleugels) and are
+released under Creative Commons Zero (CC0 1.0):
+http://creativecommons.org/publicdomain/zero/1.0/
+
+Packs used, unmodified:
+  Interface Sounds  https://kenney.nl/assets/interface-sounds
+  UI Audio          https://kenney.nl/assets/ui-audio
+  Digital Audio     https://kenney.nl/assets/digital-audio
+  Sci-fi Sounds     https://kenney.nl/assets/sci-fi-sounds

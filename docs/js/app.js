@@ -668,6 +668,7 @@ export class App {
       for (const ev of g.soundEvents) this.audio.play(ev);
       g.soundEvents.length = 0;
     }
+    this.audio.update();
     try { this.draw(); } catch (e) { console.error(e); }
     requestAnimationFrame(t => this.frame(t));
   }
