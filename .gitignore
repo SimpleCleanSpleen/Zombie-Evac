@@ -1,0 +1,12 @@
+# raw OpenStreetMap downloads (baked into docs/maps by tools/bake_maps.py)
+map_cache/
+map_cache from desktop/
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+.firebase/
+firebase-debug.log
+zombie_evac_progress.json
+zombie_evac_save.json
+zombie_evac_options.json
