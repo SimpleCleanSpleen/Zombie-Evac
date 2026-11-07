@@ -26,6 +26,8 @@ to get as many people out as you can.
 | Right click / long press | Remove an item (refund before the clock starts), cancel |
 | Barricade | Click start, click end |
 | Bomb run, lure drone | Drag the flight path |
+| Mouse wheel, pinch, E / Q, map +/- buttons | Zoom the map in / out (Z or click the zoom level to reset) |
+| Middle drag, two-finger drag, WASD / arrows | Pan the zoomed map |
 | Space | Play / pause |
 | F, +, - | Game speed 1x-8x |
 | Ctrl+Z | Undo (deploy phase or paused) |

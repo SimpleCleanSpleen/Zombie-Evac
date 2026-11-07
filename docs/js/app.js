@@ -10,6 +10,9 @@ import { TUTORIALS, Tutor } from "./tutorial.js";
 const { GW, CELL, WORLD_W, WORLD_H, CIV, ZOMBIE, DEAD } = K;
 const FONT = '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", "Ubuntu Mono", Consolas, Menlo, "Courier New", monospace';
 const BASE_W = 1280, BASE_H = 720, PANEL_MIN = 380, PANEL_MAX = 620;
+const ZOOM_MAX = 4, ZOOM_STEP = 1.25;
+const PAN_KEYS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+  a: [-1, 0], A: [-1, 0], d: [1, 0], D: [1, 0], w: [0, -1], W: [0, -1], s: [0, 1], S: [0, 1] };
 const TAU = 2 * Math.PI;
 const c = (name, a = 1) => rgb(COL[name], a);
 const ci = Math.floor;
@@ -125,6 +128,8 @@ export class App {
     this.confirmNew = false;
     this.mouse = null;
     this.overButtons = [];
+    this.zoom = 1; this.cam = [WORLD_W / 2, WORLD_H / 2];   // map camera: zoom factor, world point at the view centre
+    this.zoomButtons = []; this.touches = new Map(); this.pinched = false; this.pan = null;
     this.index = null;
     this.colorblind = !!store.options.colorblind;
     K.setPalette(this.colorblind);
@@ -198,6 +203,7 @@ export class App {
     this.game.difficulty = this.store.options.difficulty;
     this.game.setCity(city, seed, mission);
     this.cancel();
+    this.resetZoom();
     city.render(this.s);
   }
 
@@ -393,10 +399,51 @@ export class App {
 
   screenToWorld(p, clampIt = false) {
     if (!p) return null;
-    const mr = this.mapRect;
-    if (!clampIt && !(p[0] >= mr.x && p[0] < mr.x + mr.w && p[1] >= mr.y && p[1] < mr.y + mr.h)) return null;
-    return [clamp((p[0] - mr.x) / this.s, 0, WORLD_W - 0.01), clamp((p[1] - mr.y) / this.s, 0, WORLD_H - 0.01)];
+    const mr = this.mapRect, [ox, oy] = this.viewOffset(), S = this.s * this.zoom;
+    if (!clampIt && !this.inMap(p)) return null;
+    return [clamp((p[0] - mr.x + ox) / S, 0, WORLD_W - 0.01), clamp((p[1] - mr.y + oy) / S, 0, WORLD_H - 0.01)];
   }
+
+  inMap(p) {
+    const mr = this.mapRect;
+    return p[0] >= mr.x && p[0] < mr.x + mr.w && p[1] >= mr.y && p[1] < mr.y + mr.h;
+  }
+
+  // ---- map camera (zoom and pan) ---------------------------------------------
+
+  /** Top-left of the visible window, in zoomed map pixels. */
+  viewOffset() {
+    const z = this.zoom, mr = this.mapRect, S = this.s * z;
+    return [clamp(this.cam[0] * S - mr.w / 2, 0, mr.w * (z - 1)), clamp(this.cam[1] * S - mr.h / 2, 0, mr.h * (z - 1))];
+  }
+
+  clampCam() {
+    const z = this.zoom;
+    this.cam = [clamp(this.cam[0], WORLD_W / (2 * z), WORLD_W * (1 - 1 / (2 * z))),
+      clamp(this.cam[1], WORLD_H / (2 * z), WORLD_H * (1 - 1 / (2 * z)))];
+  }
+
+  /** Zoom to `z`, keeping the world point under screen point `p` (default: the view centre) where it is. */
+  zoomAt(z, p = null) {
+    const mr = this.mapRect;
+    z = clamp(z, 1, ZOOM_MAX);
+    if (Math.abs(z - 1) < 0.03) z = 1;
+    const local = p && this.inMap(p) ? [p[0] - mr.x, p[1] - mr.y] : [mr.w / 2, mr.h / 2];
+    const [ox, oy] = this.viewOffset(), S0 = this.s * this.zoom, S = this.s * z;
+    const wx = (local[0] + ox) / S0, wy = (local[1] + oy) / S0;
+    this.zoom = z;
+    this.cam = [(wx * S - local[0] + mr.w / 2) / S, (wy * S - local[1] + mr.h / 2) / S];
+    this.clampCam();
+  }
+
+  /** Drag the view by a screen-pixel delta. */
+  panBy(dx, dy) {
+    const S = this.s * this.zoom;
+    this.cam = [this.cam[0] - dx / S, this.cam[1] - dy / S];
+    this.clampCam();
+  }
+
+  resetZoom() { this.zoom = 1; this.cam = [WORLD_W / 2, WORLD_H / 2]; this.pan = null; }
 
   selectedUnits() {
     const units = this.game.units;
@@ -620,6 +667,14 @@ export class App {
     else if (k === "Enter" && g.phase !== "over" && this.tutorActive() && this.tutor.waiting) this.tutorNext();
     else if (k === "Enter" && story && g.phase === "over") this.nextOrRetry();
     else if ((k === "n" || k === "N") && !story && !ctrl) this.newCity();
+    else if (!ctrl && (k === "e" || k === "E" || k === "PageUp")) this.zoomAt(this.zoom * ZOOM_STEP, this.mouse);
+    else if (!ctrl && (k === "q" || k === "Q" || k === "PageDown")) this.zoomAt(this.zoom / ZOOM_STEP, this.mouse);
+    else if (!ctrl && (k === "z" || k === "Z" || k === "Home")) this.resetZoom();
+    else if (!ctrl && PAN_KEYS[k]) {
+      e.preventDefault();
+      const step = 0.15 * Math.min(this.mapRect.w, this.mapRect.h);
+      this.panBy(-PAN_KEYS[k][0] * step, -PAN_KEYS[k][1] * step);
+    }
   }
 
   nextOrRetry() {
@@ -732,8 +787,22 @@ export class App {
       }
       if (this.tutorBox && this.tutorActive() && this.tutor.waiting && this.inRect(p, this.tutorBox)) { this.tutorNext(); return; }
       if (p[0] >= this.panelX) { if (e.button === 0) this.clickPanel(p); return; }
+      const zb = this.zoomButtons.find(b => this.inRect(p, b.rect));
+      if (zb && e.button === 0) { this.uiSound("ui_select"); zb.action(); return; }
+      if (e.pointerType === "touch" && this.inMap(p)) {
+        this.touches.set(e.pointerId, p);
+        if (this.touches.size >= 2) {           // second finger: pinch-zoom / two-finger pan, cancel the first tap
+          clearTimeout(this.press?.timer); this.press = null;
+          if (this.selected === "bombing") this.drag = null;
+          this.lurePath = null;
+          this.pinched = true;
+          return;
+        }
+      }
+      if (this.pinched) return;
       const w = this.screenToWorld(p);
       if (!w) return;
+      if (e.button === 1) { e.preventDefault(); this.pan = { p }; return; }
       if (e.button === 2) return this.rightClick(w);
       if (e.button !== 0) return;
       if (e.pointerType === "touch") {
@@ -750,6 +819,21 @@ export class App {
       const p = pos(e);
       this.mouse = p;
       if (this.inMenu()) return this.menuPointer("move", p);
+      if (this.pan) { this.panBy(p[0] - this.pan.p[0], p[1] - this.pan.p[1]); this.pan.p = p; return; }
+      if (this.touches.has(e.pointerId)) {
+        if (this.pinched && this.touches.size >= 2) {
+          const [a, b] = [...this.touches.values()];      // the first two fingers, before and after this move
+          this.touches.set(e.pointerId, p);
+          const [a2, b2] = [...this.touches.values()];
+          const d0 = hypot(a[0] - b[0], a[1] - b[1]), d1 = hypot(a2[0] - b2[0], a2[1] - b2[1]);
+          const m0 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], m1 = [(a2[0] + b2[0]) / 2, (a2[1] + b2[1]) / 2];
+          this.panBy(m1[0] - m0[0], m1[1] - m0[1]);
+          if (d0 > 10) this.zoomAt(this.zoom * d1 / d0, m1);
+          return;
+        }
+        this.touches.set(e.pointerId, p);
+      }
+      if (this.pinched) return;
       if (this.press && hypot(p[0] - this.press.p[0], p[1] - this.press.p[1]) > 14 * this.u) { clearTimeout(this.press.timer); this.press = null; }
       if (this.lurePath) {
         const w = this.screenToWorld(p, true), last = this.lurePath[this.lurePath.length - 1];
@@ -758,6 +842,12 @@ export class App {
     });
     const up = e => {
       const p = pos(e);
+      if (this.pan && e.button === 1) { this.pan = null; return; }
+      this.touches.delete(e.pointerId);
+      if (this.pinched) {                      // a pinch never deploys anything; it ends when every finger is up
+        if (!this.touches.size) { this.pinched = false; this.mouse = null; }
+        return;
+      }
       if (this.inMenu()) return this.menuPointer("up", p);
       if (!this.game || this.mode !== "game") return;
       if (this.press) { clearTimeout(this.press.timer); const w = this.press.w; this.press = null; this.leftClick(w); }
@@ -774,6 +864,14 @@ export class App {
     this.cv.addEventListener("pointerup", up);
     this.cv.addEventListener("pointercancel", e => { if (this.press) { clearTimeout(this.press.timer); this.press = null; } up(e); });
     this.cv.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") this.mouse = null; });
+    this.cv.addEventListener("wheel", e => {
+      if (!this.game || this.mode !== "game") return;
+      const p = pos(e);
+      if (!this.inMap(p)) return;
+      e.preventDefault();
+      const dy = clamp(e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY, -240, 240);
+      this.zoomAt(this.zoom * Math.exp(-dy * 0.0025), p);
+    }, { passive: false });
     window.addEventListener("keydown", e => {
       this.audio.unlock();
       if (!this.game) return;
@@ -1055,7 +1153,10 @@ export class App {
 
   drawMap() {
     const gm = this.game, s = this.s, lw = this.lw, city = gm.city;
-    const ms = this.mapCv.getContext("2d");
+    const ms = this.mapCv.getContext("2d"), z = this.zoom, [ox, oy] = this.viewOffset();
+    ms.setTransform(1, 0, 0, 1, 0, 0);
+    if (z > 1) { ms.fillStyle = c("BG"); ms.fillRect(0, 0, this.mapCv.width, this.mapCv.height); }
+    ms.setTransform(z, 0, 0, z, -ox, -oy);   // camera: every world-space layer below is drawn zoomed and panned
     if (city.surfaceDirty || !city.surface || city.surfaceScale !== s) city.render(s);
     else if (city.rubbleNew.length) { city.paintRubble(city.surface.getContext("2d"), s, city.rubbleNew); city.rubbleNew = []; }
     ms.drawImage(city.surface, 0, 0);
@@ -1124,7 +1225,9 @@ export class App {
 
     // Everything that glows goes on a dark layer, bloomed and added over the city.
     const dg = this.dyn.getContext("2d");
+    dg.setTransform(1, 0, 0, 1, 0, 0);
     dg.fillStyle = "#000"; dg.fillRect(0, 0, this.dyn.width, this.dyn.height);
+    dg.setTransform(z, 0, 0, z, -ox, -oy);
     const uw = Math.max(2, Math.round(1.5 * s));
     for (const u of gm.units.values()) {
       const frac = u.hp === null ? 1 : Math.max(0, u.hp / u.max_hp);
@@ -1269,12 +1372,40 @@ export class App {
         [x - Math.cos(ang) * q * 0.3, y - Math.sin(ang) * q * 0.3], [x + Math.cos(ang - 2.5) * q, y + Math.sin(ang - 2.5) * q]], c("MAGENTA"));
     }
 
+    dg.setTransform(1, 0, 0, 1, 0, 0);
+    ms.setTransform(1, 0, 0, 1, 0, 0);
     ms.save();
     ms.globalCompositeOperation = "lighter";
     ms.drawImage(this.dyn, 0, 0);
     this.bloom(ms);
     ms.restore();
     this.ctx.drawImage(this.mapCv, this.mapRect.x, this.mapRect.y);
+    this.drawZoomControls();
+  }
+
+  /** Zoom buttons in the map's bottom-right corner, plus an overview inset while zoomed in. */
+  drawZoomControls() {
+    const mr = this.mapRect, u = this.u, pad = ci(10 * u), small = this.small, g = this.ctx;
+    this.zoomButtons = [];
+    if (this.mode !== "game" || this.game.phase === "over") return;
+    const bottom = mr.y + mr.h - pad, right = mr.x + mr.w - pad;
+    const plus = this.text(" + ", right, bottom, small, c("WHITE"), "bottomright", c("BG"));
+    const label = this.text(` ${this.zoom.toFixed(1)}X `, plus.x - ci(4 * u), bottom, small, this.zoom > 1 ? c("YELLOW") : c("WHITE_DIM"), "bottomright", c("BG"));
+    const minus = this.text(" - ", label.x - ci(4 * u), bottom, small, c("WHITE"), "bottomright", c("BG"));
+    for (const r of [plus, minus]) box(g, r.x, r.y, r.w, r.h, c("CYAN"), 1);
+    const grow = r => ({ x: r.x - 4, y: r.y - 4, w: r.w + 8, h: r.h + 8 });
+    this.zoomButtons = [
+      { rect: grow(plus), action: () => this.zoomAt(this.zoom * ZOOM_STEP) },
+      { rect: grow(minus), action: () => this.zoomAt(this.zoom / ZOOM_STEP) },
+      { rect: grow(label), action: () => this.resetZoom() },
+    ];
+    if (this.zoom <= 1) return;
+    const iw = ci(mr.w * 0.16), ih = ci(iw * WORLD_H / WORLD_W), ix = right - iw, iy = minus.y - ci(6 * u) - ih;
+    box(g, ix, iy, iw, ih, c("BG", 220 / 255));
+    if (this.game.city.surface) { g.globalAlpha = 0.6; g.drawImage(this.game.city.surface, ix, iy, iw, ih); g.globalAlpha = 1; }
+    box(g, ix, iy, iw, ih, c("CYAN"), 1);
+    const [ox, oy] = this.viewOffset(), z = this.zoom;
+    box(g, ix + ci(iw * ox / (mr.w * z)), iy + ci(ih * oy / (mr.h * z)), Math.max(2, ci(iw / z)), Math.max(2, ci(ih / z)), c("YELLOW"), 1);
   }
 
   polyline(g, pts, color, lw) {
@@ -1351,7 +1482,7 @@ export class App {
       b.clearRect(0, 0, this.glow.width, this.glow.height);
       b.drawImage(this.glowA, 0, 0, this.glow.width, this.glow.height);
     }
-    let k = 4 / this.dotSize() ** 2;
+    let k = 4 / (this.dotSize() * this.zoom) ** 2;
     ms.imageSmoothingEnabled = true;
     while (k > 0.01) {
       ms.globalAlpha = Math.min(1, k);

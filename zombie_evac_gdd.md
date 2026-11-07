@@ -713,7 +713,7 @@ Progress is persisted to `zombie_evac_progress.json` next to the executable (sch
 | 4 | OPERATION EAGLE'S NEST | White House, DC (±800 m) | 3,000 / 12% / 490 | all 14 VIPs **and** 30% | VIPs within 240 of the White House; ground zeros ≥ 200 away |
 | 5 | HOLD THE LINE | Times Square, NYC | 8,000 / 12% / 770 | survive 2:00; keep ≥ 35% alive or evacuated | LZs lift 50% slower (`lz_rate_mult = 1/1.5`) |
 | 6 | ZERO COLLATERAL | Shibuya Crossing, Tokyo | 8,000 / 12% / 700 | evacuate 60%; ≤ 100 collateral | artillery and bomb runs locked |
-| 7 | THE ALAMO | Arc de Triomphe, Paris | 5,000 / 15% / 910 | evacuate 45% | 12 ground zeros on a ring r 300–430 (the avenues), spacing 70; LZs only within r 110 (the Étoile roundabout) |
+| 7 | THE ALAMO | Arc de Triomphe, Paris | 5,000 / 11% / 1,100 | evacuate 40% | 12 ground zeros on a ring r 340–440 (the avenues), spacing 70; LZs only within r 140 (the Étoile roundabout) |
 | 8 | BRIDGE DEFENSE | River Thames, London (±800 m) | 6,000 / 12% / 910 | evacuate 50% | ground zeros on the south bank, civilians on the north bank; `scent_range = 250` so the south-bank hordes find the bridges; no swimmers |
 | 9 | ERADICATION | Venice (Rialto) | 3,000 / 10% / 2,100 | kill every infected; keep ≥ 40% alive | EVAC LZ locked (no evacuation); no swimmers |
 | 10 | MONUMENTAL DEFENSE | Kim Il Sung Square, Pyongyang (±800 m) | 5,000 / 15% / 980 | evacuate 50% | barricades cost 6× per cell |
@@ -1427,10 +1427,10 @@ Measured on the reference build, headless. A faithful port should land in the sa
   "title": "THE ALAMO",
   "location": "ARC DE TRIOMPHE, PARIS",
   "map": {"name": "ARC DE TRIOMPHE, PARIS", "latlon": [48.8738, 2.2950], "half_width": null},
-  "population": 5000, "infected": 0.15, "cp": 1300,
-  "ground_zeros": 12, "gz_region": {"r_min": 300, "r_max": 430}, "gz_sep": 70,
-  "lz_region": {"r_max": 110},
-  "goal": {"save_pct": 45},
+  "population": 5000, "infected": 0.11, "cp": 1100,
+  "ground_zeros": 12, "gz_region": {"r_min": 340, "r_max": 440}, "gz_sep": 70,
+  "lz_region": {"r_max": 140},
+  "goal": {"save_pct": 40},
   "briefing": ["TWELVE AVENUES MEET AT THE ETOILE. THE HORDE IS", "..."]
 }
 ```
