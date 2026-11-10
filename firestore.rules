@@ -1,3 +1,8 @@
+// Firestore rules for Firebase project zombie-evac-vl6cz, which is SHARED by two apps:
+//   - Zombie Evac    (users/, screenNames/, leaderboard/)
+//   - Fishing Guide  (anglers/)
+// The SAME file is kept in both repos. Publishing either copy replaces the rules for
+// both apps, so edit both copies together.
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -40,6 +45,32 @@ service cloud.firestore {
       allow delete: if signedIn() && request.auth.uid == uid;
     }
 
+    // ---------------- Fishing Guide (github.com/SimpleCleanSpleen/Fishing-Guide) ----------------
+    // anglers/{userId}/catches/{catchId}  logged catches (photo stored inline as base64)
+    // anglers/{userId}/spots/{spotId}     custom map pins
+    // Only the signed-in owner can read or write their own documents.
+    match /anglers/{userId} {
+      allow read, write: if signedIn() && request.auth.uid == userId;
+
+      match /catches/{catchId} {
+        allow read, delete: if signedIn() && request.auth.uid == userId;
+        // Firestore's hard limit is 1 MiB per document; the app keeps photos ~350 KB.
+        allow create, update: if signedIn() && request.auth.uid == userId
+          && request.resource.data.species is string
+          && request.resource.data.species.size() <= 60;
+      }
+
+      match /spots/{spotId} {
+        allow read, delete: if signedIn() && request.auth.uid == userId;
+        allow create, update: if signedIn() && request.auth.uid == userId
+          && request.resource.data.name is string
+          && request.resource.data.name.size() <= 80
+          && request.resource.data.lat is number
+          && request.resource.data.lng is number;
+      }
+    }
+
+    // Deny everything else.
     match /{document=**} {
       allow read, write: if false;
     }
