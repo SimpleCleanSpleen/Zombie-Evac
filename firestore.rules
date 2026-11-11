@@ -1,3 +1,8 @@
+// Firestore rules for Firebase project zombie-evac-vl6cz, which is SHARED by two apps:
+//   - Zombie Evac    (users/, screenNames/, leaderboard/)
+//   - Fishing Guide  (anglers/, anglerNames/, trips/ + messages/ & recaps/, sharedSpots/)
+// The SAME file is kept in both repos. Publishing either copy replaces the rules for
+// both apps, so edit both copies together.
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -40,6 +45,113 @@ service cloud.firestore {
       allow delete: if signedIn() && request.auth.uid == uid;
     }
 
+    // ---------------- Fishing Guide (github.com/SimpleCleanSpleen/Fishing-Guide) ----------------
+    // anglers/{userId}/catches/{catchId}  logged catches (photo stored inline as base64)
+    // anglers/{userId}/spots/{spotId}     custom map pins
+    // Only the signed-in owner can read or write their own documents.
+    match /anglers/{userId} {
+      allow read, write: if signedIn() && request.auth.uid == userId;
+
+      match /catches/{catchId} {
+        allow read, delete: if signedIn() && request.auth.uid == userId;
+        // Firestore's hard limit is 1 MiB per document; the app keeps photos ~350 KB.
+        allow create, update: if signedIn() && request.auth.uid == userId
+          && request.resource.data.species is string
+          && request.resource.data.species.size() <= 60;
+      }
+
+      match /spots/{spotId} {
+        allow read, delete: if signedIn() && request.auth.uid == userId;
+        allow create, update: if signedIn() && request.auth.uid == userId
+          && request.resource.data.name is string
+          && request.resource.data.name.size() <= 80
+          && request.resource.data.lat is number
+          && request.resource.data.lng is number;
+      }
+    }
+
+    // Usernames: the document id is the lower-case name, owned by one uid. You can only
+    // claim the name your own profile (anglers/{uid}.username) points to.
+    match /anglerNames/{name} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && name.matches('^[a-z0-9_]{3,20}$')
+        && request.resource.data.keys().hasOnly(['uid', 'name'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.name.lower() == name
+        && (resource == null || resource.data.uid == request.auth.uid)
+        && getAfter(/databases/$(database)/documents/anglers/$(request.auth.uid)).data.username == request.resource.data.name;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // Fishing trips: readable by everyone on the members list. The organizer can change
+    // anything; an invited angler can only set their own RSVP.
+    match /trips/{tripId} {
+      function validTrip(d) {
+        return d.ownerUid is string && d.members is list && d.members.size() <= 30
+          && d.ownerUid in d.members
+          && d.title is string && d.title.size() > 0 && d.title.size() <= 80
+          && d.date is string && d.date.size() == 10;
+      }
+      allow read: if signedIn() && request.auth.uid in resource.data.members;
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid
+        && validTrip(request.resource.data);
+      allow update: if signedIn() && (
+        (resource.data.ownerUid == request.auth.uid
+          && request.resource.data.ownerUid == request.auth.uid
+          && validTrip(request.resource.data))
+        || (request.auth.uid in resource.data.members
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rsvp', 'updatedAt', 'lastMessage'])
+          && (request.resource.data.rsvp == resource.data.rsvp
+            || (request.resource.data.rsvp.diff(resource.data.rsvp).affectedKeys().hasOnly([request.auth.uid])
+              && request.resource.data.rsvp[request.auth.uid] in ['going', 'maybe', 'declined']))
+          && (!('lastMessage' in request.resource.data)
+            || request.resource.data.get('lastMessage', {}) == resource.data.get('lastMessage', {})
+            || request.resource.data.lastMessage.uid == request.auth.uid)));
+      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+
+      // Trip chat: every member can read and post (as themselves). You can delete your
+      // own messages; the organizer can delete any (used when cancelling the trip).
+      match /messages/{msgId} {
+        function trip() { return get(/databases/$(database)/documents/trips/$(tripId)).data; }
+        allow read: if signedIn() && request.auth.uid in trip().members;
+        allow create: if signedIn() && request.auth.uid in trip().members
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'text', 'createdAt'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.name is string && request.resource.data.name.size() <= 40
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 1000
+          && request.resource.data.createdAt == request.time;
+        allow delete: if signedIn() && (resource.data.uid == request.auth.uid || trip().ownerUid == request.auth.uid);
+      }
+
+      // Trip recap: each member can share a summary of the catches they logged that day
+      // (no photos). Document id = that member's uid.
+      match /recaps/{memberUid} {
+        function recapTrip() { return get(/databases/$(database)/documents/trips/$(tripId)).data; }
+        allow read: if signedIn() && request.auth.uid in recapTrip().members;
+        allow create, update: if signedIn() && request.auth.uid == memberUid
+          && request.auth.uid in recapTrip().members
+          && request.resource.data.keys().hasOnly(['name', 'catches', 'updatedAt'])
+          && request.resource.data.name is string && request.resource.data.name.size() <= 40
+          && request.resource.data.catches is list && request.resource.data.catches.size() <= 100;
+        allow delete: if signedIn() && (request.auth.uid == memberUid || recapTrip().ownerUid == request.auth.uid);
+      }
+    }
+
+    // Spots anglers chose to share. Anyone can see them; only the owner can change them.
+    match /sharedSpots/{spotId} {
+      allow read: if true;
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerName is string
+        && request.resource.data.name is string && request.resource.data.name.size() <= 80
+        && request.resource.data.lat is number && request.resource.data.lng is number
+        && request.resource.data.locationId is string;
+      allow update: if signedIn() && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+
+    // Deny everything else.
     match /{document=**} {
       allow read, write: if false;
     }
